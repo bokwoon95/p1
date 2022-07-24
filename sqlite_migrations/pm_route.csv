@@ -1,4 +1,4 @@
-site_id,route_id,parent_route_id,basename,handler
-1,1,\N,one,one
-1,2,1,two,two
-1,3,2,three,three
+site_id,route_id,parent_route_id,basename,plugin,handler
+1,1,\N,one,pm,one
+1,2,1,two,pm,two
+1,3,2,three,pm,three

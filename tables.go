@@ -11,19 +11,10 @@ type PM_SITE struct {
 	IS_PRIMARY     sq.BooleanField `ddl:"unique"`
 }
 
-type PM_PLUGIN struct {
-	sq.TableStruct
-	PLUGIN        sq.StringField `ddl:"primarykey"`
-	CONFIG        sq.JSONField
-	CONFIG_SCHEMA sq.JSONField
-}
-
-type PM_HANDLER struct {
-	sq.TableStruct `ddl:"primarykey=plugin,handler"`
-	PLUGIN         sq.StringField `ddl:"references=pm_plugin"`
-	HANDLER        sq.StringField
-	CONFIG_SCHEMA  sq.JSONField
-}
+// plugins and handlers are registered by plugins on startup. The server itself
+// will scan through the pm_route table and make sure that all mentioned
+// plugins and handlers exist and have been registered. No need for foreign
+// keys.
 
 type PM_ROUTE struct {
 	sq.TableStruct  `ddl:"unique=site_id,path"`
@@ -35,7 +26,7 @@ type PM_ROUTE struct {
 	PLUGIN          sq.StringField
 	HANDLER         sq.StringField
 	CONFIG          sq.JSONField
-	_               struct{} `ddl:"foreignkey={plugin,handler references=pm_handler}"`
+	_               struct{} `ddl:"index=plugin,handler"`
 }
 
 type PM_ROUTE_HIERARCHY struct {

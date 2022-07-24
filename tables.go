@@ -17,7 +17,9 @@ type PM_ROUTE struct {
 	ROUTE_ID        sq.UUIDField `ddl:"primarykey"`
 	PARENT_ROUTE_ID sq.UUIDField `ddl:"references={pm_route.route_id index}"`
 	BASENAME        sq.StringField
+	PLUGIN          sq.StringField
 	HANDLER         sq.StringField
+	DATA            sq.JSONField
 	PATH            sq.StringField `ddl:"index"`
 }
 

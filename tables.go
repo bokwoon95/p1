@@ -18,7 +18,7 @@ type PM_ROUTE struct {
 	PARENT_ROUTE_ID sq.UUIDField `ddl:"references={pm_route.route_id index}"`
 	BASENAME        sq.StringField
 	HANDLER         sq.StringField
-	PATH            sq.StringField
+	PATH            sq.StringField `ddl:"index"`
 }
 
 type PM_ROUTE_HIERARCHY struct {

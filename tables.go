@@ -39,7 +39,7 @@ type PM_ROUTE struct {
 	_               struct{} `ddl:"index=plugin,handler"`
 }
 
-type PM_ROUTE_HIERARCHY struct {
+type PM_ROUTE_CLOSURE struct {
 	sq.TableStruct    `ddl:"primarykey=route_id,ancestor_route_id"`
 	ROUTE_ID          sq.UUIDField `ddl:"references=pm_route.route_id"`
 	ANCESTOR_ROUTE_ID sq.UUIDField `ddl:"references={pm_route.route_id index}"`

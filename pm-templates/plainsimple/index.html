@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ ThemeDir }}/index.css">
+  <title>hello world</title>
+</head>
+<body>
+    {{ template "_header.html" }}
+  <header class="banner" data-schema="{{ ThemeDir }}/index.json">
+  </header>
+  <p>hello world {{ ASSET }}/banner.jpg</p>
+  {{ template "_footer.html" }}
+  <script src="{{ ThemeDir }}/index.js"></script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+pm-site
+pm-src
+pm-static
+pm-template
+/<uuid>/pm-site
+/<uuid>/pm-src
+/<uuid>/pm-static
+/<uuid>/pm-template
+
+break incoming URL into domain, subdomain, tilde prefix and path.
+
+bokwoon.com/<subdomain>/<tilde_prefix>/site
+
+or if you are just doing it on localhost,
+<tilde_prefix>/pm-site/path
+
+localhost:8080/~breh/about-me
+blog.bokwoon.com/~breh/about-me
+
+type PageCache interface{
+    GetBytes(name string) ([]byte, error)
+    SetBytes(name string, data []byte) error
+    Get(name string) (io.Reader, error)
+    Remove(name string) error
+    Mkdir()
+    Walk()
+}
+
+type FS interface{
+    Open(name string) (fs.File, error)
+    WriteFile(name string, data []byte, perm fs.FileMode) error
+    MkdirAll(path string, perm fs.FileMode) error
+    RemoveAll(path string) error
+}
+
+type Router interface{
+    Route(url string) (fs.File, error) // the fileinfo.filename will either be *.md or *.html
+}
+
+type TemplateStore interface{
+    Get(name string) ([]byte, error)
+    Set(name string, data []byte)
+    Remove(name string) error
+    Mkdir()
+    Walk()
+}
+
+type StaticStore interface{
+}
+
+background-image: url('/pm-static/pm-template/github.com/bokwoon95/plainsimple/hero.jpg');
+
+calling a theme's template:
+
+{{ template "github.com/bokwoon95/plainsimple/page.html" }}
+{{ define "" }}
+{{ end }}
+
+{{ template "page.html" }}

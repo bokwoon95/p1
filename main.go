@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
@@ -11,7 +12,7 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"text/template"
+	"text/template/parse"
 )
 
 var bufpool = sync.Pool{
@@ -81,13 +82,42 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 			}
 			// TODO: what funcs?
 			// {{ $posts := get "github.com/bokwoon95/pagemanager/pm-blog.Posts" }}
-			template.New(name)
+			tmpl, err := template.New(name).Parse(buf.String())
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			_ = tmpl
+			// var baseTmpl *template.Template
+			// templateNames := getTemplateInvocations(tmpl)
 		case "index.md":
 		case "handler.txt":
 		default:
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func getTemplateInvocations(tmpl *template.Template) []string {
+	var s []string
+	nodes := make([]parse.Node, 0, len(tmpl.Tree.Root.Nodes))
+	for i := len(tmpl.Tree.Root.Nodes) - 1; i >= 0; i-- {
+		nodes = append(nodes, tmpl.Tree.Root.Nodes[i])
+	}
+	for len(nodes) > 0 {
+		node, nodes := nodes[len(nodes)-1], nodes[:len(nodes)-1]
+		switch node := node.(type) {
+		case *parse.TemplateNode:
+			if strings.HasSuffix(node.Name, ".html") {
+				s = append(s, node.Name)
+			}
+		case *parse.ListNode:
+			for i := len(node.Nodes) - 1; i >= 0; i-- {
+				nodes = append(nodes, node)
+			}
+		}
+	}
+	return s
 }
 
 func splitURL(host, requestPath string) (domain, subdomain, tildePrefix, pathName string) {

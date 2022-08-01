@@ -1,60 +1,43 @@
 package pagemanager
 
 import (
-	"fmt"
-	"path"
-	"strings"
+	"bytes"
+	"io/fs"
+	"net/http"
+	"sync"
 )
 
-type Path struct {
-	Domain      string
-	Subdomain   string
-	TildePrefix string
-	Name        string // must start with pm-src, pm-site, pm-static or pm-template
+var bufpool = sync.Pool{
+	New: func() any { return &bytes.Buffer{} },
 }
 
-// "localhost:8080", "/about-me" -> "pm-site/about-me/index.html"
-
-// The pagemanager handler itself will handle converting r.Host and r.Path into a name
-
-// string -> ParsedName (for filesystems that need to implement FS)
-
-func NewPath(name string) (Path, error) {
-	var p Path
-	isValidName := func(name string) bool {
-		return strings.HasPrefix(name, "pm-site/") ||
-			strings.HasPrefix(name, "pm-src/") ||
-			strings.HasPrefix(name, "pm-static/") ||
-			strings.HasPrefix(name, "pm-template/")
-	}
-	if isValidName(name) {
-		p.Name = name
-		return p, nil
-	}
-	i := strings.Index(name, "/")
-	if i < 0 {
-		return p, fmt.Errorf("invalid name")
-	}
-	if strings.Index(name[:i], ".") < 0 {
-		return p, fmt.Errorf("invalid name")
-	}
-	p.Domain = name[:i]
-	if isValidName(name[i+1:]) {
-		p.Name = name[i+1:]
-		return p, nil
-	}
-	j := strings.Index(name[i+1:], "/")
-	if j < 0 {
-		return p, fmt.Errorf("invalid name")
-	}
-	if strings.HasPrefix(name[i+1:j], "~") {
-	}
-	return p, nil
+type WriteableFS interface {
+	Open(name string) (fs.File, error)
+	ReadDir(name string) ([]fs.DirEntry, error)
+	WriteFile(name string, data []byte, perm fs.FileMode) error
+	MkdirAll(name string, perm fs.FileMode) error
+	RemoveAll(name string) error
 }
 
-func (p Path) String() string {
-	return path.Join(p.Domain, p.Subdomain, p.TildePrefix, p.Name)
+type Pagemanager struct {
+	Mode string // "" | "offline" | "singlesite" | "multisite"
+	FS   fs.ReadDirFS
 }
 
-type FileRouter struct{ // Either return index.html, index.md or handler.txt.
+func (pm *Pagemanager) Handler(name string, data map[string]any) http.Handler {
+	return nil
+}
+
+func (pm *Pagemanager) NotFound(data map[string]any) http.Handler {
+	return nil
+}
+
+func (pm *Pagemanager) InternalServerError(data map[string]any) http.Handler {
+	return nil
+}
+
+func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+	})
 }

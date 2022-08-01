@@ -108,10 +108,6 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 		mainTemplate = markdownTemplate.Lookup(name)
 	}
 
-	// A triple loop...
-	// loop over templateNames
-	// loop over templates per templateName
-	// loop over nodes per template
 	var templateNames []string
 	nodes := make([]parse.Node, 0, len(mainTemplate.Tree.Root.Nodes))
 	for i := len(mainTemplate.Tree.Root.Nodes) - 1; i >= 0; i-- {
@@ -190,6 +186,7 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
 		return
 	}
+	w.WriteHeader(code)
 	_, _ = buf.WriteTo(w)
 }
 

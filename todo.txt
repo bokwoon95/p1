@@ -3,8 +3,14 @@ pm-site
 pm-static
 pm-template
 
-TODO: markdown templates (index.md) are broken, investigate.
-pm-route/markdown/index.md: pm-route/markdown/index.md: template: pm-route/markdown/index.md:1: unexpected "&" in template clause
+TODO: properly pulling in all templates requires a double breadth-first-search loop...
+do (populate templates) while (len(templates) > 0) 
+# anytime a html template is invoked, check it exists but only add it to the template list if it hasn't been added before.
+# if it doesn't exist, append the template->calls->template pair into a slice.
+    do (populate nodes) while (len(nodes) > 0)
+don't bail on first error, if a template is missing just note it down in a slice and return that slice to the user (as human readable error) at the end.
+
+TODO: allow templates in pm-template to be .md files as well (so whenever you pull in a template you need to convert the template into a markdowned template. I think a function like Markdownify(*template.Template) (*template.Template, error) is in order.
 
 TODO: implement pm-site override.
 

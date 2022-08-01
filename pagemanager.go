@@ -36,18 +36,18 @@ type WriteableFS interface {
 
 type Config struct {
 	Mode     string // "" | "offline" | "singlesite" | "multisite"
-	FS       fs.ReadDirFS
+	FS       fs.FS
 	Handlers map[string]http.Handler
 }
 
 type Pagemanager struct {
 	mode     string
-	fs       fs.ReadDirFS
+	fs       fs.FS
 	wfs      WriteableFS
 	handlers map[string]http.Handler
 }
 
-func NewPagemanager(c *Config) (*Pagemanager, error) {
+func New(c *Config) (*Pagemanager, error) {
 	pm := &Pagemanager{
 		mode:     c.Mode,
 		fs:       c.FS,
@@ -106,8 +106,9 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 	for i := len(mainTemplate.Tree.Root.Nodes) - 1; i >= 0; i-- {
 		nodes = append(nodes, mainTemplate.Tree.Root.Nodes[i])
 	}
+	var node parse.Node
 	for len(nodes) > 0 {
-		node, nodes := nodes[len(nodes)-1], nodes[:len(nodes)-1]
+		node, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
 		switch node := node.(type) {
 		case *parse.ListNode:
 			for i := len(node.Nodes) - 1; i >= 0; i-- {
@@ -259,6 +260,20 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		domain, subdomain := splitHost(r.Host)
 		tildePrefix, urlPath := splitPath(r.URL.Path)
+		if strings.HasPrefix(urlPath, "pm-static") {
+			// file, err := pm.fs.Open(urlPath)
+			// if errors.Is(err, fs.ErrNotExist) {
+			// 	if !strings.HasPrefix(urlPath, "pm-static/pm-template") {
+			// 		pm.NotFound().ServeHTTP(w, r)
+			// 		return
+			// 	}
+			// }
+			// if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			// 	pm.InternalServerError(err).ServeHTTP(w, r)
+			// 	return
+			// }
+			// return
+		}
 		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
 		handler, err := pm.Handler(name, nil)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -287,6 +302,8 @@ func splitHost(host string) (domain, subdomain string) {
 }
 
 func splitPath(path string) (tildePrefix, urlPath string) {
+	// TODO: Langcode also needs to be extracted from the path. How to handle
+	// this? Per-site langcode.txt?
 	urlPath = strings.TrimPrefix(path, "/")
 	if strings.HasPrefix(urlPath, "~") {
 		if i := strings.Index(urlPath, "/"); i >= 0 {

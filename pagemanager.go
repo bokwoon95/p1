@@ -86,7 +86,7 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 				goldmarkhtml.WithUnsafe(),
 			),
 		)
-		// markdownTemplate := template.New("")
+		markdownTemplate := template.New("")
 		for _, t := range mainTemplate.Templates() {
 			buf.Reset()
 			for _, node := range t.Tree.Root.Nodes {
@@ -100,15 +100,18 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 					buf.WriteString(node.String())
 				}
 			}
-			fmt.Println(buf.String())
-			// _, err = markdownTemplate.New(t.Name()).Parse(buf.String())
-			// if err != nil {
-			// 	return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
-			// }
+			_, err = markdownTemplate.New(t.Name()).Parse(buf.String())
+			if err != nil {
+				return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
+			}
 		}
-		// mainTemplate = markdownTemplate
+		mainTemplate = markdownTemplate.Lookup(name)
 	}
 
+	// A triple loop...
+	// loop over templateNames
+	// loop over templates per templateName
+	// loop over nodes per template
 	var templateNames []string
 	nodes := make([]parse.Node, 0, len(mainTemplate.Tree.Root.Nodes))
 	for i := len(mainTemplate.Tree.Root.Nodes) - 1; i >= 0; i-- {

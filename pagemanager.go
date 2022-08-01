@@ -19,9 +19,24 @@ type WriteableFS interface {
 	RemoveAll(name string) error
 }
 
-type Pagemanager struct {
+type Config struct {
 	Mode string // "" | "offline" | "singlesite" | "multisite"
 	FS   fs.ReadDirFS
+}
+
+type Pagemanager struct {
+	mode string
+	fs   fs.ReadDirFS
+	wfs  WriteableFS
+}
+
+func NewPagemanager(c *Config) (*Pagemanager, error) {
+	pm := &Pagemanager{
+		mode: c.Mode,
+		fs:   c.FS,
+	}
+	pm.wfs, _ = c.FS.(WriteableFS)
+	return pm, nil
 }
 
 func (pm *Pagemanager) Handler(name string, data map[string]any) http.Handler {
@@ -37,6 +52,7 @@ func (pm *Pagemanager) InternalServerError(data map[string]any) http.Handler {
 }
 
 func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
+	pm.wfs, _ = pm.fs.(WriteableFS)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
 	})

@@ -15,7 +15,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	const port = ":8020"
-	fmt.Println("listening on localhost" + port)
-	fmt.Println(http.ListenAndServe(port, pm.Pagemanager(pm.NotFound())))
+	const addr = "127.0.0.1:8020"
+	fmt.Println("listening on " + addr)
+	fmt.Println(http.ListenAndServe(addr, pm.Pagemanager(pm.NotFound())))
 }

@@ -154,13 +154,13 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 
 func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string, code int) {
 	statusCode := strconv.Itoa(code)
-	msg = statusCode + " " + http.StatusText(code) + "\n" + msg
+	errmsg := statusCode + " " + http.StatusText(code) + "\n" + msg
 	domain, subdomain := splitHost(r.Host)
 	tildePrefix, _ := splitPath(r.URL.Path)
 	name := path.Join(domain, subdomain, tildePrefix, "pm-template", statusCode+".html")
 	file, err := pm.fs.Open(name)
 	if err != nil {
-		http.Error(w, msg, code)
+		http.Error(w, errmsg, code)
 		return
 	}
 	defer file.Close()
@@ -176,7 +176,7 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 	data["QueryParams"], _ = url.ParseQuery(r.URL.RawQuery)
 	err = tmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
-		http.Error(w, msg+"\n\n(error executing "+name+": "+err.Error()+")", code)
+		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
 		return
 	}
 	_, _ = buf.WriteTo(w)
@@ -261,18 +261,32 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 		domain, subdomain := splitHost(r.Host)
 		tildePrefix, urlPath := splitPath(r.URL.Path)
 		if strings.HasPrefix(urlPath, "pm-static") {
-			// file, err := pm.fs.Open(urlPath)
-			// if errors.Is(err, fs.ErrNotExist) {
-			// 	if !strings.HasPrefix(urlPath, "pm-static/pm-template") {
-			// 		pm.NotFound().ServeHTTP(w, r)
-			// 		return
-			// 	}
-			// }
-			// if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			// 	pm.InternalServerError(err).ServeHTTP(w, r)
-			// 	return
-			// }
-			// return
+			names := make([]string, 0, 2)
+			names = append(names, urlPath)
+			if strings.HasPrefix(urlPath, "pm-static/pm-template") {
+				names = append(names, strings.TrimPrefix(urlPath, "pm-static/"))
+			}
+			for _, name := range names {
+				file, err := pm.fs.Open(name)
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				if err != nil {
+					pm.InternalServerError(err).ServeHTTP(w, r)
+					return
+				}
+				fileinfo, err := file.Stat()
+				if err != nil {
+					pm.InternalServerError(err).ServeHTTP(w, r)
+					return
+				}
+				if fileinfo.IsDir() {
+					pm.NotFound().ServeHTTP(w, r)
+					return
+				}
+				_, _ = io.Copy(w, file)
+				return
+			}
 		}
 		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
 		handler, err := pm.Handler(name, nil)

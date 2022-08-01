@@ -3,8 +3,10 @@ package pagemanager
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -23,35 +25,66 @@ type WriteableFS interface {
 }
 
 type Config struct {
-	Mode string // "" | "offline" | "singlesite" | "multisite"
-	FS   fs.ReadDirFS
+	Mode     string // "" | "offline" | "singlesite" | "multisite"
+	FS       fs.ReadDirFS
+	Handlers map[string]http.Handler
 }
 
 type Pagemanager struct {
-	mode string
-	fs   fs.ReadDirFS
-	wfs  WriteableFS
+	mode     string
+	fs       fs.ReadDirFS
+	wfs      WriteableFS
+	handlers map[string]http.Handler
 }
 
 func NewPagemanager(c *Config) (*Pagemanager, error) {
 	pm := &Pagemanager{
-		mode: c.Mode,
-		fs:   c.FS,
+		mode:     c.Mode,
+		fs:       c.FS,
+		handlers: c.Handlers,
 	}
 	pm.wfs, _ = c.FS.(WriteableFS)
 	return pm, nil
 }
 
-// Should this return an error? What errors should I bubble up?
 func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, error) {
-	if data == nil {
-		data = make(map[string]any)
+	buf := bufpool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufpool.Put(buf)
+	var err error
+	var file fs.File
+	filenames := []string{"index.html", "index.md", "handler.txt"}
+	for _, filename := range filenames {
+		file, err = pm.fs.Open(path.Join(name, filename))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		break
 	}
-	// What possible errors could exist?
-	// .URL.Get
-	// .QueryParams.Get
-	// .Header.Get
-	return nil, nil
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	fileinfo, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	filename := fileinfo.Name()
+	switch filename {
+	case "index.html":
+	case "index.md":
+	case "handler.txt":
+	default:
+		return nil, fmt.Errorf("invalid filename %q", filename)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if data == nil {
+			data = make(map[string]any)
+		}
+		data["URL"] = r.URL
+		data["Header"] = r.Header
+		data["QueryParams"], _ = url.ParseQuery(r.URL.RawQuery)
+	}), nil
 }
 
 func (pm *Pagemanager) NotFound() http.Handler {

@@ -1,0 +1,19 @@
+{{ $themeDir := `/pm-static/pm-template/github.com/plainsimple` }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ $themeDir }}/index.css">
+  <title>hello world</title>
+</head>
+<body>
+  {{ template "github.com/bokwoon95/plainsimple/partials/header.html" }}
+  <header class="banner" data-schema="{{ $themeDir }}/index.json">
+    index.json
+  </header>
+  <p>hello world</p>
+  {{ template "github.com/bokwoon95/plainsimple/partials/footer.html" }}
+  <script src="{{ $themeDir }}/index.js"></script>
+</body>
+</html>

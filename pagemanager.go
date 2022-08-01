@@ -255,39 +255,51 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 	}), nil
 }
 
+func (pm *Pagemanager) Static(w http.ResponseWriter, r *http.Request, name string) {
+	if !strings.HasPrefix(name, "pm-static") {
+		name = path.Join("pm-static", name)
+	}
+	name = strings.TrimPrefix(name, "/")
+	names := make([]string, 0, 2)
+	names = append(names, name)
+	if strings.HasPrefix(name, "pm-static/pm-template") {
+		names = append(names, strings.TrimPrefix(name, "pm-static/"))
+	}
+	for _, name := range names {
+		file, err := pm.fs.Open(name)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			pm.InternalServerError(err).ServeHTTP(w, r)
+			return
+		}
+		fileinfo, err := file.Stat()
+		if err != nil {
+			pm.InternalServerError(err).ServeHTTP(w, r)
+			return
+		}
+		if fileinfo.IsDir() {
+			pm.NotFound().ServeHTTP(w, r)
+			return
+		}
+		_, _ = io.Copy(w, file)
+		return
+	}
+}
+
 func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 	pm.wfs, _ = pm.fs.(WriteableFS)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		domain, subdomain := splitHost(r.Host)
 		tildePrefix, urlPath := splitPath(r.URL.Path)
-		if strings.HasPrefix(urlPath, "pm-static") {
-			names := make([]string, 0, 2)
-			names = append(names, urlPath)
-			if strings.HasPrefix(urlPath, "pm-static/pm-template") {
-				names = append(names, strings.TrimPrefix(urlPath, "pm-static/"))
-			}
-			for _, name := range names {
-				file, err := pm.fs.Open(name)
-				if errors.Is(err, fs.ErrNotExist) {
-					continue
-				}
-				if err != nil {
-					pm.InternalServerError(err).ServeHTTP(w, r)
-					return
-				}
-				fileinfo, err := file.Stat()
-				if err != nil {
-					pm.InternalServerError(err).ServeHTTP(w, r)
-					return
-				}
-				if fileinfo.IsDir() {
-					pm.NotFound().ServeHTTP(w, r)
-					return
-				}
-				_, _ = io.Copy(w, file)
-				return
-			}
+		// pm-static.
+		if urlPath == "pm-static" || strings.HasPrefix(urlPath, "pm-static/") {
+			pm.Static(w, r, urlPath)
+			return
 		}
+		// TODO: pm-site.
+		// pm-route.
 		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
 		handler, err := pm.Handler(name, nil)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -317,7 +329,7 @@ func splitHost(host string) (domain, subdomain string) {
 
 func splitPath(path string) (tildePrefix, urlPath string) {
 	// TODO: Langcode also needs to be extracted from the path. How to handle
-	// this? Per-site langcode.txt?
+	// this? Per-site langcode.txt? Globally enforced langcode.txt?
 	urlPath = strings.TrimPrefix(path, "/")
 	if strings.HasPrefix(urlPath, "~") {
 		if i := strings.Index(urlPath, "/"); i >= 0 {

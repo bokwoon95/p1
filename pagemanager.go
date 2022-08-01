@@ -57,6 +57,50 @@ func New(c *Config) (*Pagemanager, error) {
 	return pm, nil
 }
 
+var markdownConverter = goldmark.New(
+	goldmark.WithParserOptions(
+		parser.WithAttribute(),
+	),
+	goldmark.WithExtensions(
+		extension.Table,
+		highlighting.NewHighlighting(
+			highlighting.WithStyle("dracula"),
+		),
+	),
+	goldmark.WithRendererOptions(
+		goldmarkhtml.WithUnsafe(),
+	),
+)
+
+func Markdownify(in *template.Template) (out *template.Template, err error) {
+	buf := bufpool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufpool.Put(buf)
+	out = template.New("")
+	for _, t := range in.Templates() {
+		if t.Tree == nil {
+			continue
+		}
+		buf.Reset()
+		for _, node := range t.Tree.Root.Nodes {
+			switch node := node.(type) {
+			case *parse.TextNode:
+				err = markdownConverter.Convert(node.Text, buf)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", t.Name(), err)
+				}
+			default:
+				buf.WriteString(node.String())
+			}
+			_, err = out.New(t.Name()).Parse(buf.String())
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", t.Name(), err)
+			}
+		}
+	}
+	return out.Lookup(in.Name()), nil
+}
+
 func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, error) {
 	buf := bufpool.Get().(*bytes.Buffer)
 	buf.Reset()
@@ -66,97 +110,108 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 		return nil, err
 	}
 	body := buf.String()
-	mainTemplate, err := template.New(name).Parse(body)
+	main, err := template.New(name).Parse(body)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-
 	if strings.HasSuffix(name, ".md") {
-		md := goldmark.New(
-			goldmark.WithParserOptions(
-				parser.WithAttribute(),
-			),
-			goldmark.WithExtensions(
-				extension.Table,
-				highlighting.NewHighlighting(
-					highlighting.WithStyle("dracula"),
-				),
-			),
-			goldmark.WithRendererOptions(
-				goldmarkhtml.WithUnsafe(),
-			),
-		)
-		markdownTemplate := template.New("")
-		for _, t := range mainTemplate.Templates() {
-			buf.Reset()
-			for _, node := range t.Tree.Root.Nodes {
-				switch node := node.(type) {
-				case *parse.TextNode:
-					err = md.Convert(node.Text, buf)
-					if err != nil {
-						return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
-					}
-				default:
-					buf.WriteString(node.String())
-				}
-			}
-			_, err = markdownTemplate.New(t.Name()).Parse(buf.String())
-			if err != nil {
-				return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
-			}
+		main, err = Markdownify(main)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		mainTemplate = markdownTemplate.Lookup(name)
 	}
 
-	var templateNames []string
-	nodes := make([]parse.Node, 0, len(mainTemplate.Tree.Root.Nodes))
-	for i := len(mainTemplate.Tree.Root.Nodes) - 1; i >= 0; i-- {
-		nodes = append(nodes, mainTemplate.Tree.Root.Nodes[i])
-	}
+	visited := make(map[string]struct{})
+	tmpls := main.Templates()
+	page := template.New("")
+	var tmpl *template.Template
+	var nodes []parse.Node
 	var node parse.Node
-	for len(nodes) > 0 {
-		node, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
-		switch node := node.(type) {
-		case *parse.ListNode:
-			for i := len(node.Nodes) - 1; i >= 0; i-- {
-				nodes = append(nodes, node.Nodes[i])
-			}
-		case *parse.TemplateNode:
-			templateNames = append(templateNames, node.Name)
-		}
-	}
-
-	baseTemplate := template.New("")
-	for _, templateName := range templateNames {
-		if !strings.HasSuffix(templateName, ".html") {
+	var errmsgs []string
+	for len(tmpls) > 0 {
+		tmpl, tmpls = tmpls[len(tmpls)-1], tmpls[:len(tmpls)-1]
+		if tmpl.Tree == nil {
 			continue
 		}
-		file, err := pm.fs.Open(path.Join("pm-template", templateName))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", name, templateName, err)
+		if cap(nodes) < len(tmpl.Tree.Root.Nodes) {
+			nodes = make([]parse.Node, 0, len(tmpl.Tree.Root.Nodes))
 		}
-		buf.Reset()
-		_, err = buf.ReadFrom(file)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", name, templateName, err)
+		for i := len(tmpl.Tree.Root.Nodes) - 1; i >= 0; i-- {
+			nodes = append(nodes, tmpl.Tree.Root.Nodes[i])
 		}
-		_ = file.Close()
-		body := buf.String()
-		_, err = baseTemplate.New(templateName).Parse(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", name, templateName, err)
+		for len(nodes) > 0 {
+			node, nodes = nodes[len(nodes)-1], nodes[:len(nodes)-1]
+			switch node := node.(type) {
+			case *parse.ListNode:
+				for i := len(node.Nodes) - 1; i >= 0; i-- {
+					nodes = append(nodes, node.Nodes[i])
+				}
+			case *parse.BranchNode:
+				for i := len(node.List.Nodes) - 1; i >= 0; i-- {
+					nodes = append(nodes, node.List.Nodes[i])
+				}
+				if node.ElseList != nil {
+					for i := len(node.ElseList.Nodes) - 1; i >= 0; i-- {
+						nodes = append(nodes, node.ElseList.Nodes[i])
+					}
+				}
+			case *parse.TemplateNode:
+				if !strings.HasSuffix(node.Name, ".html") && !strings.HasSuffix(node.Name, ".md") {
+					continue
+				}
+				if _, ok := visited[node.Name]; ok {
+					continue
+				}
+				visited[node.Name] = struct{}{}
+				file, err := pm.fs.Open(path.Join("pm-template", node.Name))
+				if err != nil {
+					body := tmpl.Tree.Root.String()
+					pos := int(node.Position())
+					line := 1 + strings.Count(body[:pos], "\n")
+					if errors.Is(err, fs.ErrNotExist) {
+						errmsgs = append(errmsgs, fmt.Sprintf("%s line %d: %s does not exist", tmpl.Name(), line, node.String()))
+						continue
+					}
+					return nil, fmt.Errorf("%s line %d: %s: %w", tmpl.Name(), line, node.String(), err)
+				}
+				buf.Reset()
+				_, err = buf.ReadFrom(file)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", node.Name, err)
+				}
+				body := buf.String()
+				t, err := template.New(node.Name).Parse(body)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", node.Name, err)
+				}
+				if strings.HasSuffix(node.Name, ".md") {
+					t, err = Markdownify(t)
+					if err != nil {
+						return nil, fmt.Errorf("%s: %w", node.Name, err)
+					}
+				}
+				for _, t := range t.Templates() {
+					_, err = page.AddParseTree(t.Name(), t.Tree)
+					if err != nil {
+						return nil, fmt.Errorf("%s: adding %s: %w", node.Name, t.Name(), err)
+					}
+					tmpls = append(tmpls, t)
+				}
+			}
 		}
 	}
-
-	for _, t := range mainTemplate.Templates() {
-		_, err = baseTemplate.AddParseTree(t.Name(), t.Tree)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
-		}
+	if len(errmsgs) > 0 {
+		return nil, fmt.Errorf("invalid template references:\n" + strings.Join(errmsgs, "\n"))
 	}
 
-	pageTemplate := baseTemplate.Lookup(name)
-	return pageTemplate, nil
+	for _, t := range main.Templates() {
+		_, err = page.AddParseTree(t.Name(), t.Tree)
+		if err != nil {
+			return nil, fmt.Errorf("%s: adding %s: %w", name, t.Name(), err)
+		}
+	}
+	page = page.Lookup(name)
+	return page, nil
 }
 
 func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string, code int) {
@@ -239,7 +294,7 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		return handler, nil
 	}
 
-	pageTemplate, err := pm.Template(handlerPath, file)
+	page, err := pm.Template(handlerPath, file)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +309,7 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		buf := bufpool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bufpool.Put(buf)
-		err = pageTemplate.ExecuteTemplate(buf, handlerPath, data)
+		err = page.ExecuteTemplate(buf, handlerPath, data)
 		if err != nil {
 			pm.InternalServerError(err).ServeHTTP(w, r)
 			return

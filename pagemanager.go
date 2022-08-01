@@ -86,19 +86,27 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 				goldmarkhtml.WithUnsafe(),
 			),
 		)
-		markdownTemplate := template.New("")
+		// markdownTemplate := template.New("")
 		for _, t := range mainTemplate.Templates() {
 			buf.Reset()
-			err = md.Convert([]byte(t.Tree.Root.String()), buf)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
+			for _, node := range t.Tree.Root.Nodes {
+				switch node := node.(type) {
+				case *parse.TextNode:
+					err = md.Convert(node.Text, buf)
+					if err != nil {
+						return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
+					}
+				default:
+					buf.WriteString(node.String())
+				}
 			}
-			_, err = markdownTemplate.New(t.Name()).Parse(buf.String())
-			if err != nil {
-				return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
-			}
+			fmt.Println(buf.String())
+			// _, err = markdownTemplate.New(t.Name()).Parse(buf.String())
+			// if err != nil {
+			// 	return nil, fmt.Errorf("%s: %s: %w", name, t.Name(), err)
+			// }
 		}
-		mainTemplate = markdownTemplate
+		// mainTemplate = markdownTemplate
 	}
 
 	var templateNames []string

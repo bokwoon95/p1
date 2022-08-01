@@ -3,6 +3,13 @@ pm-site
 pm-static
 pm-template
 
+TODO: markdown templates (index.md) are broken, investigate.
+pm-route/markdown/index.md: pm-route/markdown/index.md: template: pm-route/markdown/index.md:1: unexpected "&" in template clause
+
+TODO: implement pm-site override.
+
+TODO: extract langcode from r.Path.
+
 use regex to grab all the blocks i.e.
     {{ block "" . }}{{ end }}
 or
@@ -14,10 +21,3 @@ Blocks names with capital letters are considered to be global blocks (site-wide)
 {{ block "SITE_NAME" . }}{{ end }}
 vs
 {{ block "about-me" . }}{{ end }}
-
-TODO: markdown templates (index.md) are broken, investigate.
-pm-route/markdown/index.md: pm-route/markdown/index.md: template: pm-route/markdown/index.md:1: unexpected "&" in template clause
-
-TODO: implement pm-site override.
-
-TODO: extract langcode from r.Path.

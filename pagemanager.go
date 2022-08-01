@@ -154,7 +154,7 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 
 func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string, code int) {
 	statusCode := strconv.Itoa(code)
-	errmsg := statusCode + " " + http.StatusText(code) + "\n" + msg
+	errmsg := statusCode + " " + http.StatusText(code) + "\n\n" + msg
 	domain, subdomain := splitHost(r.Host)
 	tildePrefix, _ := splitPath(r.URL.Path)
 	name := path.Join(domain, subdomain, tildePrefix, "pm-template", statusCode+".html")
@@ -298,7 +298,6 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 			pm.Static(w, r, urlPath)
 			return
 		}
-		// TODO: pm-site.
 		// pm-route.
 		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
 		handler, err := pm.Handler(name, nil)
@@ -328,8 +327,6 @@ func splitHost(host string) (domain, subdomain string) {
 }
 
 func splitPath(path string) (tildePrefix, urlPath string) {
-	// TODO: Langcode also needs to be extracted from the path. How to handle
-	// this? Per-site langcode.txt? Globally enforced langcode.txt?
 	urlPath = strings.TrimPrefix(path, "/")
 	if strings.HasPrefix(urlPath, "~") {
 		if i := strings.Index(urlPath, "/"); i >= 0 {

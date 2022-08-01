@@ -15,4 +15,9 @@ Blocks names with capital letters are considered to be global blocks (site-wide)
 vs
 {{ block "about-me" . }}{{ end }}
 
-TODO: I suspect I don't have to use regex to parse block names out of the text; I might be able to just grab the *TemplateNode from the *ListNode and stringify it (it might contain the "block" keyword directly).
+TODO: markdown templates (index.md) are broken, investigate.
+pm-route/markdown/index.md: pm-route/markdown/index.md: template: pm-route/markdown/index.md:1: unexpected "&" in template clause
+
+TODO: implement pm-site override.
+
+TODO: extract langcode from r.Path.

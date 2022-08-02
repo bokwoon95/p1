@@ -318,20 +318,16 @@ func (f *Funcs) Index(p *PageContext, args ...string) (any, error) {
 					return err
 				}
 			}
-			page := IndexEntry{
-				PageContext: *p,
-				Data:        make(map[string]string),
-			}
-			page.PathName = path.Join(p.PathName, dirname)
+			index.Pages[i].PageContext = *p
+			index.Pages[i].PathName = path.Join(p.PathName, dirname)
+			index.Pages[i].Data = make(map[string]string)
 			for _, t := range t.Templates() {
 				name := t.Name()
 				isDataTemplate := len(name) > 0 && unicode.IsUpper(rune(name[0]))
-				if t.Tree == nil || !isDataTemplate || filepath.Ext(name) != "" {
-					continue
+				if t.Tree != nil && isDataTemplate && filepath.Ext(name) == "" {
+					index.Pages[i].Data[name] = t.Tree.Root.String()
 				}
-				page.Data[name] = t.Tree.Root.String()
 			}
-			index.Pages[i] = page
 			return nil
 		})
 	}
@@ -341,7 +337,7 @@ func (f *Funcs) Index(p *PageContext, args ...string) (any, error) {
 	}
 	n := 0
 	for _, page := range index.Pages {
-		if page.Data == nil {
+		if page.Data != nil {
 			index.Pages[n] = page
 			n++
 		}

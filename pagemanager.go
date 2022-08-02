@@ -89,7 +89,7 @@ var markdownConverter = goldmark.New(
 	goldmark.WithExtensions(
 		extension.Table,
 		highlighting.NewHighlighting(
-			highlighting.WithStyle("dracula"),
+			highlighting.WithStyle("dracula"), // TODO: eventually this will have to be user-configurable. Maybe even dynamically configurable from the front end (this will have to become a property on Pagemanager itself.
 		),
 	),
 	goldmark.WithRendererOptions(

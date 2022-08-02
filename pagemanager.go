@@ -82,23 +82,73 @@ func Markdownify(in *template.Template) (out *template.Template, err error) {
 			continue
 		}
 		buf.Reset()
-		for _, node := range t.Tree.Root.Nodes {
-			switch node := node.(type) {
-			case *parse.TextNode:
-				err = markdownConverter.Convert(node.Text, buf)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", t.Name(), err)
-				}
-			default:
-				buf.WriteString(node.String())
-			}
-			_, err = out.New(t.Name()).Parse(buf.String())
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", t.Name(), err)
-			}
+		err = markdownify(buf, t.Tree.Root)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Name(), err)
+		}
+		_, err = out.New(t.Name()).Parse(buf.String())
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", t.Name(), err)
 		}
 	}
 	return out.Lookup(in.Name()), nil
+}
+
+func markdownify(buf *bytes.Buffer, node parse.Node) error {
+	var err error
+	switch node := node.(type) {
+	case *parse.ListNode:
+		for i := range node.Nodes {
+			err = markdownify(buf, node.Nodes[i])
+			if err != nil {
+				return err
+			}
+		}
+	case *parse.BranchNode:
+		switch node.NodeType {
+		case parse.NodeIf:
+			buf.WriteString("{{if ")
+		case parse.NodeWith:
+			buf.WriteString("{{with ")
+		default:
+			panic("unknown branch type")
+		}
+		buf.WriteString(node.Pipe.String() + "}}")
+		err = markdownify(buf, node.List)
+		if err != nil {
+			return err
+		}
+		if node.ElseList != nil {
+			buf.WriteString("{{else}}")
+			err = markdownify(buf, node.ElseList)
+			if err != nil {
+				return err
+			}
+			buf.WriteString("{{end}}")
+		}
+	case *parse.RangeNode:
+		buf.WriteString("{{range " + node.Pipe.String() + "}}")
+		err = markdownify(buf, node.List)
+		if err != nil {
+			return err
+		}
+		if node.ElseList != nil {
+			buf.WriteString("{{else}}")
+			err = markdownify(buf, node.ElseList)
+			if err != nil {
+				return err
+			}
+			buf.WriteString("{{end}}")
+		}
+	case *parse.TextNode:
+		err = markdownConverter.Convert(node.Text, buf)
+		if err != nil {
+			return err
+		}
+	default:
+		buf.WriteString(node.String())
+	}
+	return nil
 }
 
 func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, error) {
@@ -147,13 +197,14 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 					nodes = append(nodes, node.Nodes[i])
 				}
 			case *parse.BranchNode:
-				for i := len(node.List.Nodes) - 1; i >= 0; i-- {
-					nodes = append(nodes, node.List.Nodes[i])
-				}
+				nodes = append(nodes, node.List)
 				if node.ElseList != nil {
-					for i := len(node.ElseList.Nodes) - 1; i >= 0; i-- {
-						nodes = append(nodes, node.ElseList.Nodes[i])
-					}
+					nodes = append(nodes, node.ElseList)
+				}
+			case *parse.RangeNode:
+				nodes = append(nodes, node.List)
+				if node.ElseList != nil {
+					nodes = append(nodes, node.ElseList)
 				}
 			case *parse.TemplateNode:
 				if !strings.HasSuffix(node.Name, ".html") && !strings.HasSuffix(node.Name, ".md") {

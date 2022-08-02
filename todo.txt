@@ -3,11 +3,9 @@ pm-site
 pm-static
 pm-template
 
-TODO: check out /plainsimple. The CSS and JS files are being requested without error but the response is completely blank? Why are the static assets not being served correctly?
+TODO: extract langcode from r.Path.
 
 TODO: implement pm-site override.
-
-TODO: extract langcode from r.Path.
 
 use regex to grab all the blocks i.e.
     {{ block "" . }}{{ end }}

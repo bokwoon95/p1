@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"text/template/parse"
+	"time"
 
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting"
@@ -293,11 +294,8 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
 		return
 	}
-	// Copied from http.Error().
-	w.Header().Set("Content-Type", http.DetectContentType(buf.Bytes()))
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
-	_, _ = buf.WriteTo(w)
+	http.ServeContent(w, r, statusCode+".html", time.Time{}, bytes.NewReader(buf.Bytes()))
 }
 
 func (pm *Pagemanager) NotFound() http.Handler {
@@ -333,6 +331,7 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		return nil, err
 	}
 	filename := fileinfo.Name()
+	modtime := fileinfo.ModTime()
 	handlerPath := path.Join(name, filename)
 
 	if filename == "handler.txt" {
@@ -369,7 +368,7 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 			pm.InternalServerError(err).ServeHTTP(w, r)
 			return
 		}
-		_, _ = buf.WriteTo(w)
+		http.ServeContent(w, r, filename, modtime, bytes.NewReader(buf.Bytes()))
 	}), nil
 }
 
@@ -413,6 +412,7 @@ func (pm *Pagemanager) Static(w http.ResponseWriter, r *http.Request, name strin
 	}
 	fileSeeker, ok := file.(io.ReadSeeker)
 	if !ok {
+		// Copied from http.Error().
 		w.Header().Set("Content-Type", mime.TypeByExtension(fileinfo.Name()))
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = io.Copy(w, file)
@@ -447,7 +447,7 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 }
 
 func splitHost(host string) (domain, subdomain string) {
-	if host == "localhost" || host == "127.0.0.1" || strings.HasPrefix(host, "localhost:") || strings.HasPrefix(host, "127.0.0.1:") {
+	if host == "localhost" || strings.HasPrefix(host, "localhost:") || host == "127.0.0.1" || strings.HasPrefix(host, "127.0.0.1:") {
 		return "", ""
 	}
 	if i := strings.LastIndex(host, "."); i >= 0 {

@@ -166,8 +166,8 @@ func markdownify(buf *bytes.Buffer, node parse.Node) error {
 			if err != nil {
 				return err
 			}
-			buf.WriteString("{{end}}")
 		}
+		buf.WriteString("{{end}}")
 	case *parse.RangeNode:
 		buf.WriteString("{{range " + node.Pipe.String() + "}}")
 		err = markdownify(buf, node.List)
@@ -180,8 +180,8 @@ func markdownify(buf *bytes.Buffer, node parse.Node) error {
 			if err != nil {
 				return err
 			}
-			buf.WriteString("{{end}}")
 		}
+		buf.WriteString("{{end}}")
 	case *parse.TextNode:
 		err = markdownConverter.Convert(node.Text, buf)
 		if err != nil {

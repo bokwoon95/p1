@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
@@ -292,13 +293,16 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
 		return
 	}
+	// Copied from http.Error().
+	w.Header().Set("Content-Type", http.DetectContentType(buf.Bytes()))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(code)
 	_, _ = buf.WriteTo(w)
 }
 
 func (pm *Pagemanager) NotFound() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pm.Error(w, r, r.RequestURI, 404)
+		pm.Error(w, r, path.Join(r.Host, r.URL.String()), 404)
 	})
 }
 
@@ -379,27 +383,42 @@ func (pm *Pagemanager) Static(w http.ResponseWriter, r *http.Request, name strin
 	if strings.HasPrefix(name, "pm-static/pm-template") {
 		names = append(names, strings.TrimPrefix(name, "pm-static/"))
 	}
+	var err error
+	var file fs.File
 	for _, name := range names {
-		file, err := pm.fs.Open(name)
+		file, err = pm.fs.Open(name)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		if err != nil {
-			pm.InternalServerError(err).ServeHTTP(w, r)
-			return
+		if err == nil {
+			break
 		}
-		fileinfo, err := file.Stat()
-		if err != nil {
-			pm.InternalServerError(err).ServeHTTP(w, r)
-			return
-		}
-		if fileinfo.IsDir() {
-			pm.NotFound().ServeHTTP(w, r)
-			return
-		}
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		pm.NotFound().ServeHTTP(w, r)
+		return
+	}
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	fileinfo, err := file.Stat()
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	if fileinfo.IsDir() {
+		pm.NotFound().ServeHTTP(w, r)
+		return
+	}
+	fileSeeker, ok := file.(io.ReadSeeker)
+	if !ok {
+		w.Header().Set("Content-Type", mime.TypeByExtension(fileinfo.Name()))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = io.Copy(w, file)
 		return
 	}
+	http.ServeContent(w, r, fileinfo.Name(), fileinfo.ModTime(), fileSeeker)
 }
 
 func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {

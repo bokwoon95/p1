@@ -2,6 +2,7 @@ package pagemanager
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -16,12 +17,14 @@ import (
 	"sync"
 	"text/template/parse"
 	"time"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
+	"golang.org/x/sync/errgroup"
 )
 
 var bufpool = sync.Pool{
@@ -40,14 +43,24 @@ type Config struct {
 	Mode     string // "" | "offline" | "singlesite" | "multisite"
 	FS       fs.FS
 	Handlers map[string]http.Handler
+	Queries  map[string]func(*PageContext, ...string) (any, error)
 }
+
+type PageContext struct {
+	Domain      string
+	Subdomain   string
+	TildePrefix string
+	PathName    string
+}
+
+func (p *PageContext) Path() string { return path.Join(p.TildePrefix, p.PathName) }
 
 type Pagemanager struct {
 	mode     string
 	fs       fs.FS
 	wfs      WriteableFS
 	handlers map[string]http.Handler
-	sources  map[string]func(...string) (any, error)
+	queries  map[string]func(*PageContext, ...string) (any, error)
 }
 
 func New(c *Config) (*Pagemanager, error) {
@@ -55,7 +68,16 @@ func New(c *Config) (*Pagemanager, error) {
 		mode:     c.Mode,
 		fs:       c.FS,
 		handlers: c.Handlers,
+		queries:  c.Queries,
 	}
+	if pm.queries == nil {
+		pm.queries = make(map[string]func(*PageContext, ...string) (any, error))
+	}
+	funcs := Funcs{
+		fs:      c.FS,
+		queries: pm.queries,
+	}
+	pm.queries["github.com/pagemanager/pagemanager.Funcs.Index"] = funcs.Index
 	pm.wfs, _ = c.FS.(WriteableFS)
 	return pm, nil
 }
@@ -75,23 +97,40 @@ var markdownConverter = goldmark.New(
 	),
 )
 
-func Markdownify(in *template.Template) (out *template.Template, err error) {
+func Markdownify(in *template.Template, funcmap map[string]any) (out *template.Template, err error) {
 	buf := bufpool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufpool.Put(buf)
-	out = template.New("")
+	if funcmap == nil {
+		out, err = in.Clone()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		out = template.New("").Funcs(funcmap)
+	}
 	for _, t := range in.Templates() {
 		if t.Tree == nil {
+			continue
+		}
+		name := t.Name()
+		isDataTemplate := len(name) > 0 && unicode.IsUpper(rune(name[0]))
+		if isDataTemplate {
+			_, err = out.AddParseTree(name, t.Tree)
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
 		buf.Reset()
 		err = markdownify(buf, t.Tree.Root)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", t.Name(), err)
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		_, err = out.New(t.Name()).Parse(buf.String())
+		body := buf.String()
+		_, err = out.New(name).Parse(body)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", t.Name(), err)
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 	}
 	return out.Lookup(in.Name()), nil
@@ -154,6 +193,163 @@ func markdownify(buf *bytes.Buffer, node parse.Node) error {
 	return nil
 }
 
+func funcmap(queries map[string]func(*PageContext, ...string) (any, error)) map[string]any {
+	return map[string]any{
+		"list": func(args ...any) []any { return args },
+		"dict": func(args ...any) (map[string]any, error) {
+			if len(args)%2 != 0 {
+				return nil, fmt.Errorf("odd number of args")
+			}
+			var ok bool
+			var key string
+			dict := make(map[string]any)
+			for i, arg := range args {
+				if i%2 != 0 {
+					key, ok = arg.(string)
+					if !ok {
+						return nil, fmt.Errorf("argument %#v is not a string", arg)
+					}
+					continue
+				}
+				dict[key] = arg
+			}
+			return dict, nil
+		},
+		"joinPath": path.Join,
+		"prefix": func(s string, prefix string) string {
+			if s == "" {
+				return ""
+			}
+			return prefix + s
+		},
+		"suffix": func(s string, suffix string) string {
+			if s == "" {
+				return ""
+			}
+			return s + suffix
+		},
+		"query": func(query string, p *PageContext, args ...string) (any, error) {
+			fn := queries[query]
+			if fn == nil {
+				return nil, fmt.Errorf("no such query %q", query)
+			}
+			return fn(p, args...)
+		},
+		"hasQuery": func(query string) bool {
+			fn := queries[query]
+			return fn != nil
+		},
+	}
+}
+
+type Funcs struct {
+	fs      fs.FS
+	queries map[string]func(*PageContext, ...string) (any, error)
+}
+
+type PageIndex struct {
+	PageContext
+	Pages []IndexEntry
+}
+
+type IndexEntry struct {
+	PageContext
+	Data map[string]string
+}
+
+func (f *Funcs) Index(p *PageContext, args ...string) (any, error) {
+	entries, err := fs.ReadDir(f.fs, path.Join(p.Domain, p.Subdomain, p.TildePrefix, "pm-route", p.PathName))
+	if err != nil {
+		return nil, err
+	}
+	index := &PageIndex{
+		PageContext: *p,
+		Pages:       make([]IndexEntry, len(entries)),
+	}
+	g, ctx := errgroup.WithContext(context.Background())
+	for i, entry := range entries {
+		i, entry := i, entry
+		g.Go(func() error {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if !entry.IsDir() {
+				return nil
+			}
+			dirname := entry.Name()
+			filenames := []string{"index.html", "index.md"}
+			var file fs.File
+			for _, filename := range filenames {
+				file, err = f.fs.Open(path.Join(p.Domain, p.Subdomain, p.TildePrefix, "pm-route", p.PathName, dirname, filename))
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				break
+			}
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			fileinfo, err := file.Stat()
+			if err != nil {
+				return err
+			}
+			filename := fileinfo.Name()
+			defer file.Close()
+			buf := bufpool.Get().(*bytes.Buffer)
+			buf.Reset()
+			defer bufpool.Put(buf)
+			_, err = buf.ReadFrom(file)
+			if err != nil {
+				return err
+			}
+			body := buf.String()
+			t, err := template.New(filename).Funcs(funcmap(f.queries)).Parse(body)
+			if err != nil {
+				return err
+			}
+			if strings.HasSuffix(filename, ".md") {
+				t, err = Markdownify(t, funcmap(f.queries))
+				if err != nil {
+					return err
+				}
+			}
+			page := IndexEntry{
+				PageContext: *p,
+				Data:        make(map[string]string),
+			}
+			page.PathName = path.Join(p.PathName, dirname)
+			for _, t := range t.Templates() {
+				name := t.Name()
+				isDataTemplate := len(name) > 0 && unicode.IsUpper(rune(name[0]))
+				if t.Tree == nil || !isDataTemplate || filepath.Ext(name) != "" {
+					continue
+				}
+				page.Data[name] = t.Tree.Root.String()
+			}
+			index.Pages[i] = page
+			return nil
+		})
+	}
+	err = g.Wait()
+	if err != nil {
+		return nil, err
+	}
+	n := 0
+	for _, page := range index.Pages {
+		if page.Data == nil {
+			index.Pages[n] = page
+			n++
+		}
+	}
+	index.Pages = index.Pages[:n]
+	return index, nil
+}
+
 func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, error) {
 	buf := bufpool.Get().(*bytes.Buffer)
 	buf.Reset()
@@ -163,12 +359,12 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 		return nil, err
 	}
 	body := buf.String()
-	main, err := template.New(name).Parse(body)
+	main, err := template.New(name).Funcs(funcmap(pm.queries)).Parse(body)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if strings.HasSuffix(name, ".md") {
-		main, err = Markdownify(main)
+		main, err = Markdownify(main, funcmap(pm.queries))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
@@ -176,7 +372,7 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 
 	visited := make(map[string]struct{})
 	tmpls := main.Templates()
-	page := template.New("")
+	page := template.New("").Funcs(funcmap(pm.queries))
 	var tmpl *template.Template
 	var nodes []parse.Node
 	var node parse.Node
@@ -234,12 +430,12 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 					return nil, fmt.Errorf("%s: %w", node.Name, err)
 				}
 				body := buf.String()
-				t, err := template.New(node.Name).Parse(body)
+				t, err := template.New(node.Name).Funcs(funcmap(pm.queries)).Parse(body)
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", node.Name, err)
 				}
 				if strings.HasSuffix(node.Name, ".md") {
-					t, err = Markdownify(t)
+					t, err = Markdownify(t, funcmap(pm.queries))
 					if err != nil {
 						return nil, fmt.Errorf("%s: %w", node.Name, err)
 					}
@@ -439,15 +635,15 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 	pm.wfs, _ = pm.fs.(WriteableFS)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		domain, subdomain := splitHost(r.Host)
-		tildePrefix, urlPath := splitPath(r.URL.Path)
+		tildePrefix, pathName := splitPath(r.URL.Path)
 		// pm-static.
-		if urlPath == "pm-static" || strings.HasPrefix(urlPath, "pm-static/") {
-			pm.Static(w, r, urlPath)
+		if pathName == "pm-static" || strings.HasPrefix(pathName, "pm-static/") {
+			pm.Static(w, r, pathName)
 			return
 		}
 		// pm-site.
 		// pm-route.
-		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
+		name := path.Join(domain, subdomain, tildePrefix, "pm-route", pathName)
 		handler, err := pm.Handler(name, nil)
 		if errors.Is(err, fs.ErrNotExist) {
 			next.ServeHTTP(w, r)
@@ -474,12 +670,12 @@ func splitHost(host string) (domain, subdomain string) {
 	return domain, subdomain
 }
 
-func splitPath(path string) (tildePrefix, urlPath string) {
-	urlPath = strings.TrimPrefix(path, "/")
-	if strings.HasPrefix(urlPath, "~") {
-		if i := strings.Index(urlPath, "/"); i >= 0 {
-			tildePrefix, urlPath = urlPath[:i], urlPath[i+1:]
+func splitPath(rawPath string) (tildePrefix, pathName string) {
+	pathName = strings.TrimPrefix(rawPath, "/")
+	if strings.HasPrefix(pathName, "~") {
+		if i := strings.Index(pathName, "/"); i >= 0 {
+			tildePrefix, pathName = pathName[:i], pathName[i+1:]
 		}
 	}
-	return tildePrefix, urlPath
+	return tildePrefix, pathName
 }

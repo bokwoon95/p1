@@ -3,16 +3,17 @@ pm-site
 pm-static
 pm-template
 
-TODO: the template source for getting all child directories of the current URL.
-{{ $pages := get `github.com/pagemanager/pagemanager.Funcs.Pages` .URL.Path }}
-{{ $pages.ParseTemplates }}
-{{ range $page := $pages }}
-    - [{{ $page.title }}]({{ $page.Path }})
-        {{ with $page.summary }}
+register custom template queries
+template queries take in the PageContext and return a value and an error
+
+TODO: Test this.
+{{ $index := query "github.com/pagemanager/pagemanager.Funcs.Index" . }}
+{{ range $page := $index.Pages }}
+    - [{{ $page.Data.Title }}]({{ $page.Path }})
+        {{ with $page.Data.Summary }}
         - {{ . }}
         {{ end }}
 {{ end }}
-always trim space for parsed template values
 
 TODO: Extract langcode from r.Path.
 

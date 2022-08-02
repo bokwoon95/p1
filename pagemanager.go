@@ -47,6 +47,7 @@ type Pagemanager struct {
 	fs       fs.FS
 	wfs      WriteableFS
 	handlers map[string]http.Handler
+	sources  map[string]func(...string) (any, error)
 }
 
 func New(c *Config) (*Pagemanager, error) {

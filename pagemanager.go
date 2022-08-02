@@ -9,8 +9,8 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
-	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -283,12 +283,7 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 	buf := bufpool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufpool.Put(buf)
-	data := map[string]any{
-		"URL":    r.URL,
-		"Header": r.Header,
-		"Msg":    msg,
-	}
-	data["QueryParams"], _ = url.ParseQuery(r.URL.RawQuery)
+	data := map[string]any{}
 	err = tmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
@@ -313,6 +308,28 @@ func (pm *Pagemanager) InternalServerError(err error) http.Handler {
 func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, error) {
 	var err error
 	var file fs.File
+
+	if filepath.Ext(name) != "" {
+		file, err = pm.fs.Open(name)
+		if err != nil {
+			return nil, err
+		}
+		fileinfo, err := file.Stat()
+		if err != nil {
+			return nil, err
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer file.Close()
+			fileSeeker, ok := file.(io.ReadSeeker)
+			if !ok {
+				w.Header().Set("Content-Type", mime.TypeByExtension(fileinfo.Name()))
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				_, _ = io.Copy(w, file)
+				return
+			}
+			http.ServeContent(w, r, fileinfo.Name(), fileinfo.ModTime(), fileSeeker)
+		}), nil
+	}
 
 	filenames := []string{"index.html", "index.md", "handler.txt"}
 	for _, filename := range filenames {
@@ -357,9 +374,6 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		if data == nil {
 			data = make(map[string]any)
 		}
-		data["URL"] = r.URL
-		data["Header"] = r.Header
-		data["QueryParams"], _ = url.ParseQuery(r.URL.RawQuery)
 		buf := bufpool.Get().(*bytes.Buffer)
 		buf.Reset()
 		defer bufpool.Put(buf)
@@ -412,7 +426,6 @@ func (pm *Pagemanager) Static(w http.ResponseWriter, r *http.Request, name strin
 	}
 	fileSeeker, ok := file.(io.ReadSeeker)
 	if !ok {
-		// Copied from http.Error().
 		w.Header().Set("Content-Type", mime.TypeByExtension(fileinfo.Name()))
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = io.Copy(w, file)
@@ -431,6 +444,7 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 			pm.Static(w, r, urlPath)
 			return
 		}
+		// pm-site.
 		// pm-route.
 		name := path.Join(domain, subdomain, tildePrefix, "pm-route", urlPath)
 		handler, err := pm.Handler(name, nil)

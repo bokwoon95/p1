@@ -3,19 +3,21 @@ pm-site
 pm-static
 pm-template
 
-TODO: Extract langcode from r.Path.
-
-TODO: Implement pm-site override.
-
 TODO: the template source for getting all child directories of the current URL.
 
+TODO: Extract langcode from r.Path.
+
 TODO: Implement i18n generation.
+
+TODO: Implement pm-site override.
 
 TODO: Move everything into the pagemanager/pagemanager repo and add the pm.Generate() command that people can throw into their main.go.
 (Again the requirement is to stuff everything into one pagemanager.go file that people can just throw into their application)
 
 TODO: Create a neocities site, setup the github actions auto publish, start writing in it.
 - A tutorial on how to create a website locally using pagemanager (how the templates work).
+- Include everything for a complete beginner; how to create a github account, how to setup github actions, how to download git, how to develop locally then push the results to github (and have github actions regenerate the website).
+- Wait you don't even need github actions, just have pagemanager integrate with the neocities REST API directly.
 
 use regex to grab all the blocks i.e.
     {{ block "" . }}{{ end }}

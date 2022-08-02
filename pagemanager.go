@@ -101,13 +101,13 @@ func Markdownify(in *template.Template, funcmap map[string]any) (out *template.T
 	buf := bufpool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufpool.Put(buf)
-	if funcmap == nil {
+	if funcmap != nil {
+		out = template.New("").Funcs(funcmap)
+	} else {
 		out, err = in.Clone()
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		out = template.New("").Funcs(funcmap)
 	}
 	for _, t := range in.Templates() {
 		if t.Tree == nil {

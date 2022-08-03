@@ -6,18 +6,24 @@ pm-template
 register custom template queries
 template queries take in the PageContext and return a value and an error
 
-TODO: Debug this.
-{{ $index := query "github.com/pagemanager/pagemanager.Funcs.Index" . }}
-{{ range $page := $index.Pages }}
-    - [{{ $page.Data.Title }}]({{ $page.Path }})
-        {{ with $page.Data.Summary }}
-        - {{ . }}
-        {{ end }}
-{{ end }}
-Why is the output some fucked up mish-mash between markdown and html?
-data-Content
-markdown templates
-data templates
+Is it true that {{ template "xxx.html" }} files are only sourced from pm-template, while {{ template "xxx.md" }} and {{ template "xxx.txt" }} are sourced from the route?
+No, make it {{ include "xxx.md" }} and {{ include "xxx.txt" }} instead.
+{{ template "xxx.md" }}, {{ template "xxx.txt" }}?
+{{ source "xxx.md" }}, {{ source "xxx.txt" }}?
+{{ src "xxx.md" }}, {{ src "xxx.txt" }}?
+{{ render "xxx.md" }}, {{ render "xxx.txt" }}?
+{{ file "xxx.md" }}, {{ file "xxx.txt" }}?
+For absolute filepaths:
+{{ include "/blog/about-me/xxx.md" }} and {{ include "/hello-world/xxx.txt" }} instead.
+No, use pm-template/ prefix for template files otherwise templates will be sourced relative to the current route.
+{{ template "pm-template/base.html" }}
+{{ template "lol.html" }}
+{{ template "data.txt" }}
+Front matter?
+
+For sorting: {{ query "github.com/pagemanager/pagemanager.Funcs.Index" "-sort updatedAt,name" }}
+
+Funcs.Index always returns name and updated_at
 
 TODO: Extract langcode from r.Path.
 

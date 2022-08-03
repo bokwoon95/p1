@@ -109,7 +109,7 @@ func Markdownify(in *template.Template, funcmap map[string]any) (out *template.T
 		}
 		name := t.Name()
 		isDataTemplate := len(name) > 0 && unicode.IsUpper(rune(name[0]))
-		if isDataTemplate {
+		if !isDataTemplate {
 			_, err = out.AddParseTree(name, t.Tree)
 			if err != nil {
 				return nil, err
@@ -124,7 +124,7 @@ func Markdownify(in *template.Template, funcmap map[string]any) (out *template.T
 		body := buf.String()
 		_, err = out.New(name).Parse(body)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return nil, fmt.Errorf("%s: %w\n%s", name, err, body)
 		}
 	}
 	return out.Lookup(in.Name()), nil
@@ -187,84 +187,107 @@ func markdownify(buf *bytes.Buffer, node parse.Node) error {
 	return nil
 }
 
-func FuncMap(queries map[string]func(*url.URL, ...string) (any, error)) map[string]any {
-	return map[string]any{
-		"list": func(args ...any) []any { return args },
-		"dict": func(args ...any) (map[string]any, error) {
-			if len(args)%2 != 0 {
-				return nil, fmt.Errorf("odd number of args")
-			}
-			var ok bool
-			var key string
-			dict := make(map[string]any)
-			for i, arg := range args {
-				if i%2 != 0 {
-					key, ok = arg.(string)
-					if !ok {
-						return nil, fmt.Errorf("argument %#v is not a string", arg)
-					}
-					continue
+var (
+	templateQueries   map[string]func(*url.URL, ...string) (any, error)
+	templateQueriesMu sync.RWMutex
+)
+
+func RegisterTemplateQuery(name string, query func(*url.URL, ...string) (any, error)) {
+	templateQueriesMu.Lock()
+	defer templateQueriesMu.Unlock()
+	templateQueries[name] = query
+}
+
+var funcmap = map[string]any{
+	"list": func(args ...any) []any { return args },
+	"dict": func(args ...any) (map[string]any, error) {
+		if len(args)%2 != 0 {
+			return nil, fmt.Errorf("odd number of args")
+		}
+		var ok bool
+		var key string
+		dict := make(map[string]any)
+		for i, arg := range args {
+			if i%2 != 0 {
+				key, ok = arg.(string)
+				if !ok {
+					return nil, fmt.Errorf("argument %#v is not a string", arg)
 				}
-				dict[key] = arg
+				continue
 			}
-			return dict, nil
-		},
-		"joinPath": path.Join,
-		"prefix": func(s string, prefix string) string {
-			if s == "" {
-				return ""
+			dict[key] = arg
+		}
+		return dict, nil
+	},
+	"joinPath": path.Join,
+	"prefix": func(s string, prefix string) string {
+		if s == "" {
+			return ""
+		}
+		return prefix + s
+	},
+	"suffix": func(s string, suffix string) string {
+		if s == "" {
+			return ""
+		}
+		return s + suffix
+	},
+	"json": func(v any) (string, error) {
+		buf := bufpool.Get().(*bytes.Buffer)
+		buf.Reset()
+		defer bufpool.Put(buf)
+		enc := json.NewEncoder(buf)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		err := enc.Encode(v)
+		if err != nil {
+			return "", err
+		}
+		return buf.String(), nil
+	},
+	"img": func(u *url.URL, src string, attrs ...string) (template.HTML, error) {
+		var b strings.Builder
+		b.WriteString("<img")
+		src = html.EscapeString(src)
+		if !strings.HasPrefix(src, "/") && !strings.HasPrefix(src, "https://") && !strings.HasPrefix(src, "http://") {
+			src = path.Join(html.EscapeString(u.Path), src)
+		}
+		b.WriteString(` src="` + src + `"`)
+		for _, attr := range attrs {
+			name, value, _ := strings.Cut(attr, " ")
+			b.WriteString(" " + html.EscapeString(name))
+			if value != "" {
+				b.WriteString(`="` + html.EscapeString(value) + `"`)
 			}
-			return prefix + s
-		},
-		"suffix": func(s string, suffix string) string {
-			if s == "" {
-				return ""
-			}
-			return s + suffix
-		},
-		"query": func(query string, p *url.URL, args ...string) (any, error) {
-			fn := queries[query]
-			if fn == nil {
-				return nil, fmt.Errorf("no such query %q", query)
-			}
-			return fn(p, args...)
-		},
-		"hasQuery": func(query string) bool {
-			fn := queries[query]
-			return fn != nil
-		},
-		"json": func(v any) (string, error) {
-			buf := bufpool.Get().(*bytes.Buffer)
-			buf.Reset()
-			defer bufpool.Put(buf)
-			enc := json.NewEncoder(buf)
-			enc.SetIndent("", "  ")
-			enc.SetEscapeHTML(false)
-			err := enc.Encode(v)
-			if err != nil {
-				return "", err
-			}
-			return buf.String(), nil
-		},
-		"img": func(u *url.URL, src string, attrs ...string) (template.HTML, error) {
-			var b strings.Builder
-			b.WriteString("<img")
-			src = html.EscapeString(src)
-			if !strings.HasPrefix(src, "/") && !strings.HasPrefix(src, "https://") && !strings.HasPrefix(src, "http://") {
-				src = path.Join(html.EscapeString(u.Path), src)
-			}
-			b.WriteString(` src="` + src + `"`)
-			for _, attr := range attrs {
-				name, value, _ := strings.Cut(attr, " ")
-				b.WriteString(" " + html.EscapeString(name))
-				if value != "" {
-					b.WriteString(`="` + html.EscapeString(value) + `"`)
-				}
-			}
-			b.WriteString(">")
-			return template.HTML(b.String()), nil
-		},
+		}
+		b.WriteString(">")
+		return template.HTML(b.String()), nil
+	},
+}
+
+func FuncMap() map[string]any {
+	queries := make(map[string]func(*url.URL, ...string) (any, error))
+	templateQueriesMu.RLock()
+	defer templateQueriesMu.RUnlock()
+	for name, query := range templateQueries {
+		queries[name] = query
 	}
+	m := make(map[string]any)
+	for name, fn := range funcmap {
+		m[name] = fn
+	}
+	m["query"] = func(name string, p *url.URL, args ...string) (any, error) {
+		fn := queries[name]
+		if fn == nil {
+			return nil, fmt.Errorf("no such query %q", name)
+		}
+		return fn(p, args...)
+	}
+	m["hasQuery"] = func(name string) bool {
+		fn := queries[name]
+		return fn != nil
+	}
+	return m
 }
 
 type Funcs struct {
@@ -335,12 +358,12 @@ func (f *Funcs) Index(u *url.URL, args ...string) (any, error) {
 				return err
 			}
 			body := buf.String()
-			t, err := template.New(filename).Funcs(FuncMap(f.queries)).Parse(body)
+			t, err := template.New(filename).Funcs(FuncMap()).Parse(body)
 			if err != nil {
 				return err
 			}
 			if strings.HasSuffix(filename, ".md") {
-				t, err = Markdownify(t, FuncMap(f.queries))
+				t, err = Markdownify(t, FuncMap())
 				if err != nil {
 					return err
 				}
@@ -382,19 +405,19 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 		return nil, err
 	}
 	body := buf.String()
-	main, err := template.New(name).Funcs(FuncMap(pm.queries)).Parse(body)
+	main, err := template.New(name).Funcs(FuncMap()).Parse(body)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if strings.HasSuffix(name, ".md") {
-		main, err = Markdownify(main, FuncMap(pm.queries))
+		main, err = Markdownify(main, FuncMap())
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 	}
 
 	visited := make(map[string]struct{})
-	page := template.New("").Funcs(FuncMap(pm.queries))
+	page := template.New("").Funcs(FuncMap())
 	tmpls := main.Templates()
 	var tmpl *template.Template
 	var nodes []parse.Node
@@ -453,12 +476,12 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 					return nil, fmt.Errorf("%s: %w", node.Name, err)
 				}
 				body := buf.String()
-				t, err := template.New(node.Name).Funcs(FuncMap(pm.queries)).Parse(body)
+				t, err := template.New(node.Name).Funcs(FuncMap()).Parse(body)
 				if err != nil {
 					return nil, fmt.Errorf("%s: %w", node.Name, err)
 				}
 				if strings.HasSuffix(node.Name, ".md") {
-					t, err = Markdownify(t, FuncMap(pm.queries))
+					t, err = Markdownify(t, FuncMap())
 					if err != nil {
 						return nil, fmt.Errorf("%s: %w", node.Name, err)
 					}
@@ -505,6 +528,7 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 	defer bufpool.Put(buf)
 	err = tmpl.ExecuteTemplate(buf, name, map[string]any{
 		"URL": r.URL,
+		"Msg": msg,
 	})
 	if err != nil {
 		http.Error(w, errmsg+"\n\n(error executing "+name+": "+err.Error()+")", code)
@@ -601,6 +625,7 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		data["URL"] = r.URL
 		err = page.ExecuteTemplate(buf, handlerPath, data)
 		if err != nil {
+			fmt.Println(buf.String())
 			pm.InternalServerError(err).ServeHTTP(w, r)
 			return
 		}
@@ -656,11 +681,88 @@ func (pm *Pagemanager) Static(w http.ResponseWriter, r *http.Request, name strin
 	http.ServeContent(w, r, fileinfo.Name(), fileinfo.ModTime(), fileSeeker)
 }
 
+func (pm *Pagemanager) debug(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	err := r.ParseForm()
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	buf := bufpool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufpool.Put(buf)
+	filename := r.Form.Get("f")
+	templateName := r.Form.Get("t")
+	step := r.Form.Get("s")
+	file, err := pm.fs.Open(path.Join("pm-route", filename))
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	defer file.Close()
+	_, err = buf.ReadFrom(file)
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	body := buf.String()
+	t, err := template.New(filename).Parse(body)
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	var b strings.Builder
+	if err := markdownConverter.Convert(buf.Bytes(), &b); err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	fmt.Println(b.String())
+
+	if templateName != "" {
+		t = t.Lookup(templateName)
+		if t == nil {
+			pm.Error(w, r, "no such template "+templateName, 400)
+			return
+		}
+	}
+	if t.Tree == nil {
+		pm.Error(w, r, t.Name()+" is empty", 500)
+		return
+	}
+	if step == "" || step == "0" {
+		_, _ = io.WriteString(w, t.Tree.Root.String())
+		return
+	}
+
+	t, err = Markdownify(t, FuncMap())
+	if err != nil {
+		pm.InternalServerError(err).ServeHTTP(w, r)
+		return
+	}
+	if step == "1" {
+		_, _ = io.WriteString(w, t.Tree.Root.String())
+		return
+	}
+
+	err = t.ExecuteTemplate(w, templateName, map[string]any{
+		"URL": r.URL,
+	})
+	if err != nil {
+		_, _ = io.WriteString(w, "\n\n"+err.Error())
+	}
+}
+
 func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 	pm.wfs, _ = pm.fs.(WriteableFS)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		domain, subdomain := splitHost(r.Host)
 		tildePrefix, pathName := splitPath(r.URL.Path)
+		// pm-debug.
+		if pathName == "pm-debug" || strings.HasPrefix(pathName, "pm-debug/") {
+			pm.debug(w, r)
+			return
+		}
 		// pm-static.
 		if pathName == "pm-static" || strings.HasPrefix(pathName, "pm-static/") {
 			pm.Static(w, r, pathName)

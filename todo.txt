@@ -21,7 +21,7 @@ No, use pm-template/ prefix for template files otherwise templates will be sourc
 {{ template "data.txt" }}
 Front matter?
 
-For sorting: {{ query "github.com/pagemanager/pagemanager.Funcs.Index" "-sort updatedAt,name" }}
+For sorting: {{ query "github.com/pagemanager/pagemanager.Funcs.Index" "-sort" "updatedAt,name" }}
 
 Funcs.Index always returns name and updated_at
 

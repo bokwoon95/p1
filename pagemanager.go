@@ -234,11 +234,17 @@ func FuncMap(queries map[string]func(*url.URL, ...string) (any, error)) map[stri
 			return fn != nil
 		},
 		"json": func(v any) (string, error) {
-			b, err := json.MarshalIndent(v, "", "  ")
+			buf := bufpool.Get().(*bytes.Buffer)
+			buf.Reset()
+			defer bufpool.Put(buf)
+			enc := json.NewEncoder(buf)
+			enc.SetIndent("", "  ")
+			enc.SetEscapeHTML(false)
+			err := enc.Encode(v)
 			if err != nil {
 				return "", err
 			}
-			return string(b), nil
+			return buf.String(), nil
 		},
 		"img": func(u *url.URL, src string, attrs ...string) (template.HTML, error) {
 			var b strings.Builder

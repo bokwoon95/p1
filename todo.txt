@@ -6,7 +6,7 @@ pm-template
 register custom template queries
 template queries take in the PageContext and return a value and an error
 
-TODO: Test this.
+TODO: Debug this.
 {{ $index := query "github.com/pagemanager/pagemanager.Funcs.Index" . }}
 {{ range $page := $index.Pages }}
     - [{{ $page.Data.Title }}]({{ $page.Path }})
@@ -14,10 +14,10 @@ TODO: Test this.
         - {{ . }}
         {{ end }}
 {{ end }}
-
-TODO: Why is pengwin.jfif not being requested with relative to the current path?
-
-TODO: Remove PageContext, change it to just URL. You can extract the domain/subdomain/tildePrefix/pathName from the URL, and the URL is more generally applicable.
+Why is the output some fucked up mish-mash between markdown and html?
+data-Content
+markdown templates
+data templates
 
 TODO: Extract langcode from r.Path.
 

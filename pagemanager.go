@@ -3,6 +3,7 @@ package pagemanager
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -239,6 +240,13 @@ func funcmap(queries map[string]func(*PageContext, ...string) (any, error)) map[
 			fn := queries[query]
 			return fn != nil
 		},
+		"json": func(v any) (string, error) {
+			b, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(b), nil
+		},
 	}
 }
 
@@ -367,8 +375,8 @@ func (pm *Pagemanager) Template(name string, r io.Reader) (*template.Template, e
 	}
 
 	visited := make(map[string]struct{})
-	tmpls := main.Templates()
 	page := template.New("").Funcs(funcmap(pm.queries))
+	tmpls := main.Templates()
 	var tmpl *template.Template
 	var nodes []parse.Node
 	var node parse.Node

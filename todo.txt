@@ -15,6 +15,10 @@ TODO: Test this.
         {{ end }}
 {{ end }}
 
+TODO: Why is pengwin.jfif not being requested with relative to the current path?
+
+TODO: Remove PageContext, change it to just URL. You can extract the domain/subdomain/tildePrefix/pathName from the URL, and the URL is more generally applicable.
+
 TODO: Extract langcode from r.Path.
 
 TODO: Implement i18n generation.

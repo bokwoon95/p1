@@ -1,4 +1,4 @@
-{{ template `base.html` }}
+{{ template `base.html` . }}
 {{ define `content` }}
 # hi there!
 
@@ -11,6 +11,6 @@ It's me, [Winston](https://google.com) from Overwatch.
 
     - <p>five</p>
 
-![pengwin](pengwin.jfif)
+{{ img .URL "pengwin.jfif" "alt pengwin" }}
 
 {{ end }}

@@ -43,7 +43,7 @@ type WriteableFS interface {
 }
 
 type Config struct {
-	Mode     string // "" | "offline" | "singlesite" | "multisite"
+	Mode     string // "" | "offline" | "online"
 	FS       fs.FS
 	Handlers map[string]http.Handler
 	Queries  map[string]func(*url.URL, ...string) (any, error)
@@ -54,7 +54,6 @@ type Pagemanager struct {
 	fs       fs.FS
 	wfs      WriteableFS
 	handlers map[string]http.Handler
-	queries  map[string]func(*url.URL, ...string) (any, error)
 }
 
 func New(c *Config) (*Pagemanager, error) {
@@ -62,16 +61,9 @@ func New(c *Config) (*Pagemanager, error) {
 		mode:     c.Mode,
 		fs:       c.FS,
 		handlers: c.Handlers,
-		queries:  c.Queries,
 	}
-	if pm.queries == nil {
-		pm.queries = make(map[string]func(*url.URL, ...string) (any, error))
-	}
-	funcs := Funcs{
-		fs:      c.FS,
-		queries: pm.queries,
-	}
-	pm.queries["github.com/pagemanager/pagemanager.Funcs.Index"] = funcs.Index
+	// funcs := Funcs{fs: c.FS}
+	// pm.queries["github.com/pagemanager/pagemanager.Funcs.Index"] = funcs.Index
 	pm.wfs, _ = c.FS.(WriteableFS)
 	return pm, nil
 }
@@ -266,15 +258,15 @@ var funcmap = map[string]any{
 }
 
 func FuncMap() map[string]any {
+	m := make(map[string]any)
+	for name, fn := range funcmap {
+		m[name] = fn
+	}
 	queries := make(map[string]func(*url.URL, ...string) (any, error))
 	templateQueriesMu.RLock()
 	defer templateQueriesMu.RUnlock()
 	for name, query := range templateQueries {
 		queries[name] = query
-	}
-	m := make(map[string]any)
-	for name, fn := range funcmap {
-		m[name] = fn
 	}
 	m["query"] = func(name string, p *url.URL, args ...string) (any, error) {
 		fn := queries[name]
@@ -290,11 +282,6 @@ func FuncMap() map[string]any {
 	return m
 }
 
-type Funcs struct {
-	fs      fs.FS
-	queries map[string]func(*url.URL, ...string) (any, error)
-}
-
 type PageIndex struct {
 	url.URL
 	Pages []IndexEntry
@@ -305,10 +292,12 @@ type IndexEntry struct {
 	Data map[string]string
 }
 
+type Funcs struct{ fs fs.FS }
+
 func (f *Funcs) Index(u *url.URL, args ...string) (any, error) {
 	domain, subdomain := splitHost(u.Host)
 	tildePrefix, pathName := splitPath(u.Path)
-	entries, err := fs.ReadDir(f.fs, path.Join(domain, subdomain, tildePrefix, "pm-route", pathName))
+	entries, err := fs.ReadDir(f.fs, path.Join(domain, subdomain, tildePrefix, "pm-src", pathName))
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +321,7 @@ func (f *Funcs) Index(u *url.URL, args ...string) (any, error) {
 			filenames := []string{"index.html", "index.md"}
 			var file fs.File
 			for _, filename := range filenames {
-				file, err = f.fs.Open(path.Join(domain, subdomain, tildePrefix, "pm-route", pathName, dirname, filename))
+				file, err = f.fs.Open(path.Join(domain, subdomain, tildePrefix, "pm-src", pathName, dirname, filename))
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
@@ -515,7 +504,7 @@ func (pm *Pagemanager) Error(w http.ResponseWriter, r *http.Request, msg string,
 	errmsg := statusCode + " " + http.StatusText(code) + "\n\n" + msg
 	domain, subdomain := splitHost(r.Host)
 	tildePrefix, _ := splitPath(r.URL.Path)
-	name := path.Join(domain, subdomain, tildePrefix, "pm-template", statusCode+".html")
+	name := path.Join(domain, subdomain, tildePrefix, "pm-src", statusCode+".html")
 	file, err := pm.fs.Open(name)
 	if err != nil {
 		http.Error(w, errmsg, code)
@@ -614,7 +603,6 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 	if err != nil {
 		return nil, err
 	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		buf := bufpool.Get().(*bytes.Buffer)
 		buf.Reset()
@@ -625,7 +613,6 @@ func (pm *Pagemanager) Handler(name string, data map[string]any) (http.Handler, 
 		data["URL"] = r.URL
 		err = page.ExecuteTemplate(buf, handlerPath, data)
 		if err != nil {
-			fmt.Println(buf.String())
 			pm.InternalServerError(err).ServeHTTP(w, r)
 			return
 		}
@@ -695,7 +682,7 @@ func (pm *Pagemanager) debug(w http.ResponseWriter, r *http.Request) {
 	filename := r.Form.Get("f")
 	templateName := r.Form.Get("t")
 	step := r.Form.Get("s")
-	file, err := pm.fs.Open(path.Join("pm-route", filename))
+	file, err := pm.fs.Open(path.Join("pm-src", filename))
 	if err != nil {
 		pm.InternalServerError(err).ServeHTTP(w, r)
 		return
@@ -769,8 +756,8 @@ func (pm *Pagemanager) Pagemanager(next http.Handler) http.Handler {
 			return
 		}
 		// pm-site.
-		// pm-route.
-		name := path.Join(domain, subdomain, tildePrefix, "pm-route", pathName)
+		// pm-src.
+		name := path.Join(domain, subdomain, tildePrefix, "pm-src", pathName)
 		handler, err := pm.Handler(name, nil)
 		if errors.Is(err, fs.ErrNotExist) {
 			next.ServeHTTP(w, r)

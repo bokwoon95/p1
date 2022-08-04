@@ -1,5 +1,5 @@
-pm-route
 pm-site
+pm-src
 pm-static
 pm-template
 
@@ -20,6 +20,26 @@ No, use pm-template/ prefix for template files otherwise templates will be sourc
 {{ template "lol.html" }}
 {{ template "data.txt" }}
 Front matter?
+
+start with pm-template -> look in pm-template
+start with ! -> override
+
+{{ block "abc.md" . }}Here is a replacement{{ end }}
+
+{{ block "pm-template/SITE_NAME.txt" . }}SITE_NAME{{ end }}
+
+{{ template "" }}
+
+TODO: rework Funcs.Index to returns a more generic index i.e. not just dirs with index.html inside. This allows users to create pages where content is added by adding new files into the directory e.g. a running changelog without needing to add a new subroute.
+
+templates with extensions *.{html,md,txt} starting with / are sourced from the pm-template folder
+templates with extensions *.{html,md,txt} are sourced relative to the current directory
+overrideable templates are Capitalized
+global templates are ALL_CAPS
+
+{{ define "!site name" }}$SITE_NAME{{ end }}
+{{ template "pm-template/github.com/htr3n/hyde-hyde/layouts/about/single.html" . }}
+~site_name.html
 
 For sorting: {{ query "github.com/pagemanager/pagemanager.Funcs.Index" "-sort" "updatedAt,name" }}
 
